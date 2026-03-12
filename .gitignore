@@ -83,3 +83,6 @@ Thumbs.db
 shrinkwrap.yaml
 .glitch-assets
 .glitchdotcom.json
+
+# Node-gyp
+.node-gyp

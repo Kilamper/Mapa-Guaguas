@@ -74,7 +74,7 @@ function checkAndStartTrips() {
 
     const stopTimes = cachedStopTimes[trip.trip_id];
     if (stopTimes.length === 0) return; // Skip if no stop times
-    
+
     const firstStopTime = convertirHora(stopTimes[0].arrival_time).getTime();
     if (fechaActual.getTime() === firstStopTime) {
       startAnimation(trip, stopTimes);
@@ -200,9 +200,10 @@ function init() {
 
 function fetchData(filename, callback) {
   fetch(
-    `https://cdn.glitch.global/16da4edb-53fe-4801-9575-2b429ea86330/${filename}`
+    `/api/transit/${filename}`
   )
     .then((response) => {
+      console.log(response);
       if (!response.ok) throw new Error("Error: " + response.statusText);
       return response.text();
     })
@@ -261,7 +262,7 @@ function procesarCSVStops(content) {
 function procesarCSVShapes(content) {
   const sep = ","; // Separador ;
   const filas = content.split("\n");
-  
+
   const encabezados = filas[0].split(sep);
   const indices = {
     shape_id: encabezados.indexOf("shape_id"),
