@@ -5,17 +5,17 @@ import { loadStopModel } from "./render_objects.js";
 
 let scene, renderer, camera, controls;
 let mapa, mapsx, mapsy;
-let stopModelPromise = loadStopModel();
+//let stopModelPromise = loadStopModel();
 
 // Latitud y longitud de los extremos del mapa de la imagen
-let minlon = -15.58702,
-  maxlon = -15.36202;
-let minlat = 28.04844,
-  maxlat = 28.18623;
+let minlon = -15.979614257812502,
+  maxlon = -15.218811035156252;
+let minlat = 27.898562920006924,
+  maxlat = 28.25782008117972;
 // Dimensiones textura (mapa)
 let txwidth, txheight;
 
-const fechaInicio = new Date(2023, 0, 1); //Desde mayo (enero es 0)
+const fechaInicio = new Date(); // Hora actual
 let fechaActual;
 let totalMinutos = 0,
   fecha2show;
@@ -29,24 +29,92 @@ const datosStopTimes = [];
 
 let selectedRouteId = null;
 let activeSpheres = [];
+let routeLines = [];
 
 const selectDiv = document.createElement("div");
-selectDiv.style.width = "100%";
 selectDiv.style.position = "absolute";
+selectDiv.style.top = "0";
+selectDiv.style.left = "0";
+selectDiv.style.width = "320px";
+selectDiv.style.height = "100%";
+selectDiv.style.backgroundColor = "rgba(15, 23, 42, 0.92)";
+selectDiv.style.color = "white";
+selectDiv.style.zIndex = "10";
+selectDiv.style.padding = "30px 20px";
+selectDiv.style.boxSizing = "border-box";
+selectDiv.style.boxShadow = "4px 0 15px rgba(0,0,0,0.3)";
+selectDiv.style.fontFamily = "'Segoe UI', Roboto, Helvetica, sans-serif";
 selectDiv.style.display = "flex";
-selectDiv.style.top = "50px";
-selectDiv.style.justifyContent = "center";
-selectDiv.style.zIndex = "1";
+selectDiv.style.flexDirection = "column";
+
+const title = document.createElement("h2");
+title.innerText = "Mapa Guaguas";
+title.style.marginTop = "0";
+title.style.marginBottom = "25px";
+title.style.fontSize = "26px";
+title.style.fontWeight = "700";
+title.style.color = "#f8fafc";
+selectDiv.appendChild(title);
+
+const label = document.createElement("label");
+label.innerText = "Línea seleccionada:";
+label.style.marginBottom = "10px";
+label.style.fontSize = "14px";
+label.style.color = "#94a3b8";
+selectDiv.appendChild(label);
+
 const routeSelect = document.createElement("select");
 routeSelect.id = "routeSelect";
+routeSelect.style.width = "100%";
+routeSelect.style.padding = "12px 10px";
+routeSelect.style.borderRadius = "8px";
+routeSelect.style.border = "1px solid #334155";
+routeSelect.style.backgroundColor = "#1e293b";
+routeSelect.style.color = "white";
+routeSelect.style.fontSize = "16px";
+routeSelect.style.outline = "none";
+routeSelect.style.cursor = "pointer";
 
 const placeholder = document.createElement("option");
-placeholder.text = "Select a route";
-placeholder.disabled = true;
+placeholder.text = "Todas las rutas";
+placeholder.value = "";
 placeholder.selected = true;
 routeSelect.appendChild(placeholder);
 
 selectDiv.appendChild(routeSelect);
+
+const buttonsContainer = document.createElement("div");
+buttonsContainer.style.display = "none";
+buttonsContainer.style.flexDirection = "column";
+buttonsContainer.style.gap = "12px";
+buttonsContainer.style.marginTop = "25px";
+
+function createPremiumButton(text) {
+  const btn = document.createElement("a");
+  btn.innerText = text;
+  btn.target = "_blank";
+  btn.style.display = "block";
+  btn.style.textAlign = "center";
+  btn.style.padding = "12px 15px";
+  btn.style.backgroundColor = "#2563eb";
+  btn.style.color = "white";
+  btn.style.textDecoration = "none";
+  btn.style.borderRadius = "6px";
+  btn.style.fontWeight = "600";
+  btn.style.fontSize = "14px";
+  btn.style.transition = "background-color 0.2s";
+  btn.style.boxShadow = "0 2px 4px rgba(0,0,0,0.2)";
+  btn.onmouseover = () => btn.style.backgroundColor = "#1d4ed8";
+  btn.onmouseout = () => btn.style.backgroundColor = "#2563eb";
+  return btn;
+}
+
+const btnPlanos = createPremiumButton("🗺️ Plano de la Ruta");
+const btnHorarios = createPremiumButton("🕒 Horarios de la Ruta");
+
+buttonsContainer.appendChild(btnPlanos);
+buttonsContainer.appendChild(btnHorarios);
+selectDiv.appendChild(buttonsContainer);
 
 let cachedTrips = [];
 let cachedStopTimes = {};
@@ -54,6 +122,25 @@ let cachedStopTimes = {};
 routeSelect.addEventListener("change", (event) => {
   selectedRouteId = event.target.value;
   cacheTripsAndStopTimes();
+
+  // Update line visibility on map
+  routeLines.forEach(({ line, shape_id }) => {
+    if (!selectedRouteId || selectedRouteId === "") {
+      line.visible = true;
+    } else {
+      const tripMatch = datosTrips.find(t => t.shape_id === shape_id && t.route_id === selectedRouteId);
+      line.visible = !!tripMatch;
+    }
+  });
+
+  // Toggle buttons visibility and update URLs
+  if (selectedRouteId && selectedRouteId !== "") {
+    buttonsContainer.style.display = "flex";
+    btnPlanos.href = `https://www.guaguas.com/pdf/lineas/linea${selectedRouteId}.pdf`;
+    btnHorarios.href = `https://www.guaguas.com/pdf/lineas/L${selectedRouteId}CaraB.pdf`;
+  } else {
+    buttonsContainer.style.display = "none";
+  }
 });
 
 function cacheTripsAndStopTimes() {
@@ -69,6 +156,8 @@ function cacheTripsAndStopTimes() {
 function checkAndStartTrips() {
   if (!selectedRouteId) return;
 
+  const currentMillis = fechaActual.getTime();
+
   cachedTrips.forEach((trip) => {
     if (!trip.shape_id) return; // Skip if shape_id is undefined
 
@@ -76,9 +165,106 @@ function checkAndStartTrips() {
     if (stopTimes.length === 0) return; // Skip if no stop times
 
     const firstStopTime = convertirHora(stopTimes[0].arrival_time).getTime();
-    if (fechaActual.getTime() === firstStopTime) {
-      startAnimation(trip, stopTimes);
+    const lastStopTime = convertirHora(stopTimes[stopTimes.length - 1].arrival_time).getTime();
+
+    if (currentMillis >= firstStopTime && currentMillis <= lastStopTime) {
+      if (!activeSpheres.some(active => active.trip_id === trip.trip_id)) {
+        startAnimation(trip, stopTimes);
+      }
     }
+  });
+}
+
+// Convert Lat/Lon to Web Mercator Projection
+function lonToWebMercatorX(lon) {
+  return lon * 6378137 * Math.PI / 180;
+}
+
+function latToWebMercatorY(lat) {
+  return Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI / 180) / 2)) * 6378137;
+}
+
+function MapeoX(lon) {
+  let x = lonToWebMercatorX(lon);
+  let minx = lonToWebMercatorX(minlon);
+  let maxx = lonToWebMercatorX(maxlon);
+  return Mapeo(x, minx, maxx, -mapsx / 2, mapsx / 2);
+}
+
+function MapeoY(lat) {
+  let y = latToWebMercatorY(lat);
+  let miny = latToWebMercatorY(minlat);
+  let maxy = latToWebMercatorY(maxlat);
+  return Mapeo(y, miny, maxy, -mapsy / 2, mapsy / 2);
+}
+
+const MAX_MERCATOR = 20037508.342789244;
+let cx, cy, METER_TO_UNIT;
+let currentTiles = new Map();
+const tileGroup = new THREE.Group();
+const textureLoader = new THREE.TextureLoader();
+
+function updateTiles() {
+  if (!METER_TO_UNIT) return;
+  const screenWidthUnits = camera.position.z * 2 * Math.tan((camera.fov * Math.PI / 180) / 2) * camera.aspect;
+  const screenWidthMeters = screenWidthUnits / METER_TO_UNIT;
+  const targetTileWidthMeters = screenWidthMeters / (window.innerWidth / 256);
+  let z = Math.round(Math.log2((MAX_MERCATOR * 2) / targetTileWidthMeters));
+  z = Math.max(0, Math.min(19, z));
+  const centerWorldX = (camera.position.x / METER_TO_UNIT) + cx;
+  const centerWorldY = (camera.position.y / METER_TO_UNIT) + cy;
+  const tileWidthMeters = (MAX_MERCATOR * 2) / Math.pow(2, z);
+  const rX = screenWidthMeters / 2;
+  const rY = screenWidthMeters / (2 * camera.aspect);
+  const minWx = centerWorldX - rX;
+  const maxWx = centerWorldX + rX;
+  const minWy = centerWorldY - rY;
+  const maxWy = centerWorldY + rY;
+  const minTx = Math.floor((minWx + MAX_MERCATOR) / tileWidthMeters);
+  const maxTx = Math.floor((maxWx + MAX_MERCATOR) / tileWidthMeters);
+  const minTy = Math.floor((MAX_MERCATOR - maxWy) / tileWidthMeters);
+  const maxTy = Math.floor((MAX_MERCATOR - minWy) / tileWidthMeters);
+  const visibleKeys = new Set();
+
+  for (let tx = minTx - 3; tx <= maxTx + 3; tx++) {
+    for (let ty = minTy - 3; ty <= maxTy + 3; ty++) {
+      if (tx < 0 || tx >= Math.pow(2, z) || ty < 0 || ty >= Math.pow(2, z)) continue;
+      const key = `${z}_${tx}_${ty}`;
+      visibleKeys.add(key);
+      if (!currentTiles.has(key)) {
+        addTile(z, tx, ty, tileWidthMeters);
+      }
+    }
+  }
+
+  for (const [key, mesh] of currentTiles.entries()) {
+    if (!visibleKeys.has(key)) {
+      tileGroup.remove(mesh);
+      if (mesh.material.map) mesh.material.map.dispose();
+      mesh.material.dispose();
+      mesh.geometry.dispose();
+      currentTiles.delete(key);
+    }
+  }
+}
+
+function addTile(z, tx, ty, tileWidthMeters) {
+  const url = `https://tile.openstreetmap.org/${z}/${tx}/${ty}.png`;
+  const geometry = new THREE.PlaneGeometry(tileWidthMeters * METER_TO_UNIT, tileWidthMeters * METER_TO_UNIT);
+  const material = new THREE.MeshBasicMaterial({ color: 0xffffff, depthWrite: false });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.renderOrder = -1;
+  mesh.visible = false;
+  const centerWx = (tx + 0.5) * tileWidthMeters - MAX_MERCATOR;
+  const centerWy = MAX_MERCATOR - (ty + 0.5) * tileWidthMeters;
+  mesh.position.set((centerWx - cx) * METER_TO_UNIT, (centerWy - cy) * METER_TO_UNIT, 0);
+  const key = `${z}_${tx}_${ty}`;
+  currentTiles.set(key, mesh);
+  tileGroup.add(mesh);
+  textureLoader.load(url, (texture) => {
+    material.map = texture;
+    material.needsUpdate = true;
+    mesh.visible = true;
   });
 }
 
@@ -86,23 +272,36 @@ init();
 animate();
 
 function init() {
-  //Muestra fecha como título
+  // Muestra fecha en la barra lateral
   fecha2show = document.createElement("div");
-  fecha2show.style.position = "absolute";
-  fecha2show.style.top = "30px";
-  fecha2show.style.width = "100%";
+  fecha2show.style.marginTop = "auto";
+  fecha2show.style.marginBottom = "10px";
+  fecha2show.style.padding = "15px";
+  fecha2show.style.backgroundColor = "rgba(0, 0, 0, 0.2)";
+  fecha2show.style.borderRadius = "8px";
   fecha2show.style.textAlign = "center";
-  fecha2show.style.color = "#000";
-  fecha2show.style.fontWeight = "bold";
-  fecha2show.style.backgroundColor = "transparent";
-  fecha2show.style.zIndex = "1";
-  fecha2show.style.fontFamily = "Monospace";
+  fecha2show.style.color = "#94a3b8";
+  fecha2show.style.fontSize = "15px";
+  fecha2show.style.fontFamily = "'Courier New', Courier, monospace";
   fecha2show.innerHTML = "";
-  document.body.appendChild(fecha2show);
+
+  selectDiv.appendChild(fecha2show);
+
+  // Leyenda de Guaguas Municipales
+  const leyenda = document.createElement("div");
+  leyenda.innerHTML = 'Datos e información propiedad de <a href="https://www.guaguas.com/" target="_blank" style="color: #60a5fa; text-decoration: none;">Guaguas Municipales</a>';
+  leyenda.style.fontSize = "12px";
+  leyenda.style.color = "#64748b";
+  leyenda.style.textAlign = "center";
+  leyenda.style.padding = "5px";
+
+  selectDiv.appendChild(leyenda);
   document.body.appendChild(selectDiv);
 
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xd5ebf0);
+  // We remove the solid scene background because we need it transparent!
+  // scene.background = new THREE.Color(0xd5ebf0);
+
   camera = new THREE.PerspectiveCamera(
     45,
     window.innerWidth / window.innerHeight,
@@ -112,11 +311,15 @@ function init() {
   // Posición de la cámara
   camera.position.set(0, 0, 100);
 
-  renderer = new THREE.WebGLRenderer();
+  // Setup WebGL Renderer
+  renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setClearColor(0x9bd8f6, 1); // Water color matching OSM
   document.body.appendChild(renderer.domElement);
 
-  controls = new MapControls(camera, renderer.domElement);
+  scene.add(tileGroup);
+
+  controls = new MapControls(camera, renderer.domElement); // Controls run on WebGL overlay
   controls.enableDamping = true; // Activar amortiguación
   controls.dampingFactor = 0.25; // Ajusta la suavidad del movimiento
   controls.enableRotate = false; // Desactivar la rotación
@@ -124,62 +327,43 @@ function init() {
   controls.zoomSpeed = 1; // Ajustar la velocidad de zoom
 
   // Límite de zoom
-  controls.minDistance = 10; // Distancia mínima
-  controls.maxDistance = 120; // Distancia máxima
+  controls.minDistance = 1; // Distancia mínima
+  controls.maxDistance = 250; // Distancia máxima
 
-  // Enable tilt with ctrl + drag
+  // Bloqueo de rotación de cámara
   controls.mouseButtons = {
     LEFT: THREE.MOUSE.PAN,
     MIDDLE: THREE.MOUSE.DOLLY,
-    RIGHT: THREE.MOUSE.ROTATE,
+    RIGHT: THREE.MOUSE.PAN, // Evita la rotación con clic derecho
   };
   controls.touches = {
     ONE: THREE.TOUCH.PAN,
-    TWO: THREE.TOUCH.DOLLY_ROTATE,
+    TWO: THREE.TOUCH.DOLLY_PAN, // Evita la rotación con dos dedos
   };
 
-  window.addEventListener("keydown", (event) => {
-    if (event.ctrlKey) {
-      controls.enableRotate = true;
-    }
-  });
+  // Restricciones de ángulo: fijar el paneo pero permitimos que la cámara
+  // mantenga su perspectiva Z natural constante.
+  controls.maxAzimuthAngle = 0;
+  controls.minAzimuthAngle = 0;
+  // Al estar el mapa en el plano X/Y, mirar de frente implica un polar angle de 90 grados (PI/2).
+  controls.minPolarAngle = Math.PI / 2;
+  controls.maxPolarAngle = Math.PI / 2;
 
-  window.addEventListener("keyup", (event) => {
-    if (!event.ctrlKey) {
-      controls.enableRotate = false;
-    }
-  });
+  // Calculate Map Mercator Bounds
+  const mercMinX = lonToWebMercatorX(minlon);
+  const mercMaxX = lonToWebMercatorX(maxlon);
+  const mercMinY = latToWebMercatorY(minlat);
+  const mercMaxY = latToWebMercatorY(maxlat);
 
-  // Crear el plano de mapa
-  mapsx = 100;
-  mapsy = 100;
-  Plano(0, 0, 0, mapsx, mapsy);
+  const mercWidth = mercMaxX - mercMinX;
+  const mercHeight = mercMaxY - mercMinY;
 
-  // Cargar textura del mapa
-  const tx1 = new THREE.TextureLoader().load(
-    "https://cdn.glitch.me/16da4edb-53fe-4801-9575-2b429ea86330/mapaLPGC.svg?v=1731458312478",
-    function (texture) {
-      texture.minFilter = THREE.LinearFilter;
-      texture.magFilter = THREE.NearestFilter;
-      texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  mapsx = 100; // Base reference sizing width
+  mapsy = mapsx * (mercHeight / mercWidth); // Exact Aspect Ratio
 
-      mapa.material.map = texture;
-      mapa.material.needsUpdate = true;
-
-      txwidth = texture.image.width;
-      txheight = texture.image.height;
-
-      if (txheight > txwidth) {
-        let factor = txheight / txwidth;
-        mapa.scale.set(1, factor, 1);
-        mapsy *= factor;
-      } else {
-        let factor = txwidth / txheight;
-        mapa.scale.set(factor, 1, 1);
-        mapsx *= factor;
-      }
-    }
-  );
+  METER_TO_UNIT = mapsx / mercWidth;
+  cx = (mercMinX + mercMaxX) / 2;
+  cy = (mercMinY + mercMaxY) / 2;
 
   // Add ambient light
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.8); // Soft white light
@@ -203,7 +387,6 @@ function fetchData(filename, callback) {
     `/api/transit/${filename}`
   )
     .then((response) => {
-      console.log(response);
       if (!response.ok) throw new Error("Error: " + response.statusText);
       return response.text();
     })
@@ -233,28 +416,16 @@ function procesarCSVStops(content) {
         lon: columna[indices.lon],
       });
 
-      let mlon = Mapeo(
-        columna[indices.lon],
-        minlon,
-        maxlon,
-        -mapsx / 2,
-        mapsx / 2
-      );
-      let mlat = Mapeo(
-        columna[indices.lat],
-        minlat,
-        maxlat,
-        -mapsy / 2,
-        mapsy / 2
-      );
+      let mlon = MapeoX(columna[indices.lon]);
+      let mlat = MapeoY(columna[indices.lat]);
 
-      stopModelPromise
+      /*stopModelPromise
         .then((model) => {
           addStopModel(mlon, mlat, 0, model);
         })
         .catch((error) => {
           console.error("Error loading stop model:", error);
-        });
+        });*/
     }
   }
 }
@@ -297,12 +468,12 @@ function procesarCSVShapes(content) {
   for (const shape_id in rutas) {
     rutas[shape_id].sort((a, b) => a.sequence - b.sequence);
     const points = rutas[shape_id].map((p) => {
-      const x = Mapeo(p.lon, minlon, maxlon, -mapsx / 2, mapsx / 2);
-      const y = Mapeo(p.lat, minlat, maxlat, -mapsy / 2, mapsy / 2);
+      const x = MapeoX(p.lon);
+      const y = MapeoY(p.lat);
       return new THREE.Vector3(x, y, 0);
     });
     const routeColor = getRouteColor(shape_id);
-    drawRoute(points, routeColor);
+    drawRoute(points, routeColor, shape_id);
   }
 }
 
@@ -398,10 +569,11 @@ function getRouteColor(shape_id) {
   return 0x0000ff; // Default color if not found
 }
 
-function drawRoute(points, color) {
+function drawRoute(points, color, shape_id) {
   const geometry = new THREE.BufferGeometry().setFromPoints(points);
   const material = new THREE.LineBasicMaterial({ color: parseInt(color, 16) });
   const line = new THREE.Line(geometry, material);
+  routeLines.push({ line, shape_id });
   scene.add(line);
 }
 
@@ -425,7 +597,10 @@ function Esfera(px, py, pz, radio, nx, ny, col) {
 
 function Plano(px, py, pz, sx, sy) {
   let geometry = new THREE.PlaneGeometry(sx, sy);
-  let material = new THREE.MeshBasicMaterial({});
+  let material = new THREE.MeshBasicMaterial({
+    transparent: true,
+    opacity: 0
+  });
   let mesh = new THREE.Mesh(geometry, material);
   mesh.position.set(px, py, pz);
   scene.add(mesh);
@@ -450,9 +625,8 @@ function convertirHora(horaStr) {
 }
 
 function actualizarFecha() {
-  totalMinutos += 1;
-  // Añade fecha de partida
-  fechaActual = new Date(fechaInicio.getTime() + totalMinutos * 60000);
+  // Ajuste en tiempo real
+  fechaActual = new Date();
 
   // Formatea salida
   const opciones = {
@@ -485,8 +659,8 @@ function startAnimation(trip, stopTimes) {
   if (shapePoints.length === 0) return; // Skip if no shape points
 
   const points = shapePoints.map((p) => {
-    const x = Mapeo(p.lon, minlon, maxlon, -mapsx / 2, mapsx / 2);
-    const y = Mapeo(p.lat, minlat, maxlat, -mapsy / 2, mapsy / 2);
+    const x = MapeoX(p.lon);
+    const y = MapeoY(p.lat);
     return new THREE.Vector3(x, y, 0);
   });
 
@@ -499,7 +673,7 @@ function startAnimation(trip, stopTimes) {
     32,
     0xff0000
   );
-  activeSpheres.push({ sphere, points, stopTimes, currentIndex: 0 });
+  activeSpheres.push({ trip_id: trip.trip_id, sphere, points, stopTimes, currentIndex: 0 });
 }
 
 function updateSpheres() {
@@ -566,6 +740,7 @@ function animate() {
   actualizarFecha();
   checkAndStartTrips(); // Check for new trips to start
   updateSpheres(); // Update the positions of the spheres
+  updateTiles(); // Fetch and render visible OSM tiles dynamically
   requestAnimationFrame(animate);
   controls.update();
   renderer.render(scene, camera);
