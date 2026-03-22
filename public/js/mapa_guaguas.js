@@ -1,26 +1,15 @@
 import * as THREE from "three";
 import { MapControls } from "three/examples/jsm/controls/MapControls";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
-import { loadStopModel } from "./render_objects.js";
+import { parseCSVStops, parseCSVShapes, parseCSVTrips, parseCSVRoutes, parseCSVStopTimes } from "./parsers.js";
+import { minlon, maxlon, minlat, maxlat, MapeoX as utilsMapeoX, MapeoY as utilsMapeoY, lonToWebMercatorX, latToWebMercatorY, convertirHora as utilsConvertirHora } from "./utils.js";
 
 let scene, renderer, camera, controls;
-let mapa, mapsx, mapsy;
-//let stopModelPromise = loadStopModel();
+let mapsx, mapsy;
 
-// Latitud y longitud de los extremos del mapa de la imagen
-let minlon = -15.979614257812502,
-  maxlon = -15.218811035156252;
-let minlat = 27.898562920006924,
-  maxlat = 28.25782008117972;
-// Dimensiones textura (mapa)
-let txwidth, txheight;
+// Latitud y longitud moved to utils.js
 
-const fechaInicio = new Date(); // Hora actual
 let fechaActual;
-let totalMinutos = 0,
-  fecha2show;
-
-let objetos = [];
+let fecha2show;
 const datosStops = [];
 const datosShapes = [];
 const datosTrips = [];
@@ -30,6 +19,9 @@ const datosStopTimes = [];
 let selectedRouteId = null;
 let activeSpheres = [];
 let routeLines = [];
+let stopSprites = [];
+const stopIconTexture = new THREE.TextureLoader().load("/assets/images/parada-icon.png");
+const guaguaIconTexture = new THREE.TextureLoader().load("/assets/images/guagua-icon.png");
 
 const selectDiv = document.createElement("div");
 selectDiv.style.position = "absolute";
@@ -133,6 +125,26 @@ routeSelect.addEventListener("change", (event) => {
     }
   });
 
+  // Calculate visible stops
+  let visibleStopIds = new Set();
+  if (selectedRouteId && selectedRouteId !== "") {
+    cachedTrips.forEach(trip => {
+      const stopTimes = cachedStopTimes[trip.trip_id];
+      if (stopTimes) {
+        stopTimes.forEach(st => visibleStopIds.add(st.stop_id));
+      }
+    });
+  }
+
+  // Update stops visibility on map
+  stopSprites.forEach(({ sprite, stop_id }) => {
+    if (!selectedRouteId || selectedRouteId === "") {
+      sprite.visible = true;
+    } else {
+      sprite.visible = visibleStopIds.has(stop_id);
+    }
+  });
+
   // Toggle buttons visibility and update URLs
   if (selectedRouteId && selectedRouteId !== "") {
     buttonsContainer.style.display = "flex";
@@ -175,28 +187,9 @@ function checkAndStartTrips() {
   });
 }
 
-// Convert Lat/Lon to Web Mercator Projection
-function lonToWebMercatorX(lon) {
-  return lon * 6378137 * Math.PI / 180;
-}
-
-function latToWebMercatorY(lat) {
-  return Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI / 180) / 2)) * 6378137;
-}
-
-function MapeoX(lon) {
-  let x = lonToWebMercatorX(lon);
-  let minx = lonToWebMercatorX(minlon);
-  let maxx = lonToWebMercatorX(maxlon);
-  return Mapeo(x, minx, maxx, -mapsx / 2, mapsx / 2);
-}
-
-function MapeoY(lat) {
-  let y = latToWebMercatorY(lat);
-  let miny = latToWebMercatorY(minlat);
-  let maxy = latToWebMercatorY(maxlat);
-  return Mapeo(y, miny, maxy, -mapsy / 2, mapsy / 2);
-}
+// Projection functions moved to utils.js
+function MapeoX(lon) { return utilsMapeoX(lon, mapsx); }
+function MapeoY(lat) { return utilsMapeoY(lat, mapsy); }
 
 const MAX_MERCATOR = 20037508.342789244;
 let cx, cy, METER_TO_UNIT;
@@ -305,11 +298,11 @@ function init() {
   camera = new THREE.PerspectiveCamera(
     45,
     window.innerWidth / window.innerHeight,
-    1,
+    0.01,
     10000
   );
-  // Posición de la cámara
-  camera.position.set(0, 0, 100);
+  // Posición de la cámara (z = zoom, x y= paneo)
+  camera.position.set(15, 5, 25);
 
   // Setup WebGL Renderer
   renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -320,6 +313,7 @@ function init() {
   scene.add(tileGroup);
 
   controls = new MapControls(camera, renderer.domElement); // Controls run on WebGL overlay
+  controls.target.set(15, 5, 0); // Fija el punto al que mira la cámara para que mantenga su picado recto
   controls.enableDamping = true; // Activar amortiguación
   controls.dampingFactor = 0.25; // Ajusta la suavidad del movimiento
   controls.enableRotate = false; // Desactivar la rotación
@@ -395,78 +389,32 @@ function fetchData(filename, callback) {
 }
 
 function procesarCSVStops(content) {
-  const sep = ","; // Separador ;
-  const filas = content.split("\n");
+  const parsedStops = parseCSVStops(content);
+  datosStops.push(...parsedStops);
 
-  const encabezados = filas[0].split(sep);
-  const indices = {
-    id: encabezados.indexOf("stop_id"),
-    nombre: encabezados.indexOf("stop_name"),
-    lat: encabezados.indexOf("stop_lat"),
-    lon: encabezados.indexOf("stop_lon"),
-  };
+  parsedStops.forEach(stop => {
+    let mlon = MapeoX(stop.lon);
+    let mlat = MapeoY(stop.lat);
 
-  for (let i = 1; i < filas.length; i++) {
-    const columna = filas[i].split(sep);
-    if (columna.length > 1) {
-      datosStops.push({
-        id: columna[indices.id],
-        nombre: columna[indices.nombre],
-        lat: columna[indices.lat],
-        lon: columna[indices.lon],
-      });
-
-      let mlon = MapeoX(columna[indices.lon]);
-      let mlat = MapeoY(columna[indices.lat]);
-
-      /*stopModelPromise
-        .then((model) => {
-          addStopModel(mlon, mlat, 0, model);
-        })
-        .catch((error) => {
-          console.error("Error loading stop model:", error);
-        });*/
-    }
-  }
+    const material = new THREE.SpriteMaterial({
+      map: stopIconTexture,
+      depthTest: false,
+      depthWrite: false
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.set(mlon, mlat, 0);
+    sprite.renderOrder = 1;
+    sprite.scale.set(0.05, 0.05, 1);
+    scene.add(sprite);
+    stopSprites.push({ sprite, stop_id: stop.id });
+  });
 }
 
 function procesarCSVShapes(content) {
-  const sep = ","; // Separador ;
-  const filas = content.split("\n");
-
-  const encabezados = filas[0].split(sep);
-  const indices = {
-    shape_id: encabezados.indexOf("shape_id"),
-    lat: encabezados.indexOf("shape_pt_lat"),
-    lon: encabezados.indexOf("shape_pt_lon"),
-    sequence: encabezados.indexOf("shape_pt_sequence"),
-  };
-
-  const rutas = {};
-
-  for (let i = 1; i < filas.length; i++) {
-    const columna = filas[i].split(sep);
-    if (columna.length > 1) {
-      datosShapes.push({
-        shape_id: columna[indices.shape_id],
-        lat: columna[indices.lat],
-        lon: columna[indices.lon],
-        sequence: columna[indices.sequence],
-      });
-      const shape_id = columna[indices.shape_id];
-      if (!rutas[shape_id]) {
-        rutas[shape_id] = [];
-      }
-      rutas[shape_id].push({
-        lat: parseFloat(columna[indices.lat]),
-        lon: parseFloat(columna[indices.lon]),
-        sequence: parseInt(columna[indices.sequence]),
-      });
-    }
-  }
+  const { datosShapes: parsedShapes, rutas } = parseCSVShapes(content);
+  datosShapes.push(...parsedShapes);
 
   for (const shape_id in rutas) {
-    rutas[shape_id].sort((a, b) => a.sequence - b.sequence);
     const points = rutas[shape_id].map((p) => {
       const x = MapeoX(p.lon);
       const y = MapeoY(p.lat);
@@ -478,83 +426,19 @@ function procesarCSVShapes(content) {
 }
 
 function procesarCSVTrips(content) {
-  const sep = ","; // Separador ;
-  const filas = content.split("\n");
-
-  const encabezados = filas[0].split(sep);
-  const indices = {
-    route_id: encabezados.indexOf("route_id"),
-    trip_id: encabezados.indexOf("trip_id"),
-    direction_id: encabezados.indexOf("direction_id"),
-    shape_id: encabezados.indexOf("shape_id"),
-  };
-
-  for (let i = 1; i < filas.length; i++) {
-    const columna = filas[i].split(sep);
-    if (columna.length > 1) {
-      datosTrips.push({
-        route_id: columna[indices.route_id],
-        trip_id: columna[indices.trip_id],
-        direction_id: parseInt(columna[indices.direction_id]),
-        shape_id: columna[indices.shape_id],
-      });
-    }
-  }
+  const parsedTrips = parseCSVTrips(content);
+  datosTrips.push(...parsedTrips);
 }
 
 function procesarCSVRoutes(content) {
-  const sep = ","; // Separador ;
-  const filas = content.split("\n");
-
-  const encabezados = filas[0].split(sep);
-  const indices = {
-    route_id: encabezados.indexOf("route_id"),
-    route_name: encabezados.indexOf("route_long_name"),
-    route_url: encabezados.indexOf("route_url"),
-    route_color: encabezados.indexOf("route_color"),
-  };
-
-  for (let i = 1; i < filas.length; i++) {
-    const columna = filas[i].split(sep);
-    if (columna.length > 1) {
-      datosRoutes.push({
-        route_id: columna[indices.route_id],
-        route_name: columna[indices.route_name],
-        route_url: columna[indices.route_url],
-        route_color: columna[indices.route_color],
-      });
-    }
-  }
+  const parsedRoutes = parseCSVRoutes(content);
+  datosRoutes.push(...parsedRoutes);
   populateRouteSelect();
 }
 
 function procesarCSVStopTimes(content) {
-  const sep = ","; // Separador ;
-  const filas = content.split("\n");
-
-  const encabezados = filas[0].split(sep);
-  const indices = {
-    trip_id: encabezados.indexOf("trip_id"),
-    arrival_time: encabezados.indexOf("arrival_time"),
-    departure_time: encabezados.indexOf("departure_time"),
-    stop_id: encabezados.indexOf("stop_id"),
-    stop_sequence: encabezados.indexOf("stop_sequence"),
-  };
-
-  for (let i = 1; i < filas.length; i++) {
-    const columna = filas[i].split(sep);
-    if (columna.length > 1) {
-      datosStopTimes.push({
-        trip_id: columna[indices.trip_id],
-        arrival_time: columna[indices.arrival_time],
-        departure_time: columna[indices.departure_time],
-        stop_id: columna[indices.stop_id],
-        stop_sequence: columna[indices.stop_sequence],
-      });
-    }
-  }
-
-  // Start the animation after all data is loaded
+  const parsedTimes = parseCSVStopTimes(content);
+  datosStopTimes.push(...parsedTimes);
   checkAndStartTrips();
 }
 
@@ -577,52 +461,8 @@ function drawRoute(points, color, shape_id) {
   scene.add(line);
 }
 
-//valor, rango origen, rango destino
-function Mapeo(val, vmin, vmax, dmin, dmax) {
-  let t = (val - vmin) / (vmax - vmin); // Normalización desde vmin hasta vmax
-  return dmin + t * (dmax - dmin);
-}
-
-function Esfera(px, py, pz, radio, nx, ny, col) {
-  let geometry = new THREE.SphereGeometry(radio, nx, ny);
-  let material = new THREE.MeshBasicMaterial({
-    color: col,
-  });
-  let mesh = new THREE.Mesh(geometry, material);
-  mesh.position.set(px, py, pz);
-  objetos.push(mesh);
-  scene.add(mesh);
-  return mesh;
-}
-
-function Plano(px, py, pz, sx, sy) {
-  let geometry = new THREE.PlaneGeometry(sx, sy);
-  let material = new THREE.MeshBasicMaterial({
-    transparent: true,
-    opacity: 0
-  });
-  let mesh = new THREE.Mesh(geometry, material);
-  mesh.position.set(px, py, pz);
-  scene.add(mesh);
-  mapa = mesh;
-}
-
-// Función para convertir una fecha en formato DD/MM/YYYY HH:mm, presenmte en archivo de préstamos, a Date
-function convertirFecha(fechaStr) {
-  if (!fechaStr) return null; // Return null if fechaStr is invalid
-  const [fecha, hora] = fechaStr.split(" ");
-  if (!fecha || !hora) return null; // Return null if fecha or hora is invalid
-  const [dia, mes, año] = fecha.split("/").map(Number);
-  const [horas, minutos] = hora.split(":").map(Number);
-  return new Date(año, mes - 1, dia, horas, minutos); // mes es 0-indexado
-}
-
-function convertirHora(horaStr) {
-  if (!horaStr) return null; // Return null if horaStr is invalid
-  const [horas, minutos] = horaStr.split(":").map(Number);
-  const year = fechaActual.getFullYear(); // Obtain only the year of fechaActual
-  return new Date(year, fechaActual.getMonth(), fechaActual.getDate(), horas, minutos); // mes es 0-indexado
-}
+// Conversion function now mapped from utils
+function convertirHora(horaStr) { return utilsConvertirHora(horaStr, fechaActual); }
 
 function actualizarFecha() {
   // Ajuste en tiempo real
@@ -642,13 +482,7 @@ function actualizarFecha() {
   fecha2show.innerHTML = fechaActual.toLocaleString("es-ES", opciones);
 }
 
-function addStopModel(px, py, pz, model) {
-  const clonedModel = model.clone();
-  clonedModel.position.set(px, py, pz);
-  clonedModel.scale.set(0.05, 0.05, 0.05); // Adjust the scale as needed
-  objetos.push(clonedModel);
-  scene.add(clonedModel);
-}
+// Removed old addStopModel logic
 
 function startAnimation(trip, stopTimes) {
   const shapeId = trip.shape_id;
@@ -664,15 +498,16 @@ function startAnimation(trip, stopTimes) {
     return new THREE.Vector3(x, y, 0);
   });
 
-  const sphere = Esfera(
-    points[0].x,
-    points[0].y,
-    points[0].z,
-    0.2,
-    32,
-    32,
-    0xff0000
-  );
+  const material = new THREE.SpriteMaterial({
+    map: guaguaIconTexture,
+    depthTest: false,
+    depthWrite: false
+  });
+  const sphere = new THREE.Sprite(material);
+  sphere.position.set(points[0].x, points[0].y, 0);
+  sphere.renderOrder = 2; // Always render the buses on top of the map and stops
+  sphere.scale.set(0.08, 0.08, 1); // Using slightly larger scale than stop icons if desired, adjust as necessary
+  scene.add(sphere);
   activeSpheres.push({ trip_id: trip.trip_id, sphere, points, stopTimes, currentIndex: 0 });
 }
 
