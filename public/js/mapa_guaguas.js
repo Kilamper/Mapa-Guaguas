@@ -42,6 +42,7 @@ selectDiv.style.flexDirection = "column";
 const title = document.createElement("h2");
 title.innerText = "Mapa Guaguas";
 title.style.marginTop = "0";
+title.style.textAlign = "center";
 title.style.marginBottom = "25px";
 title.style.fontSize = "26px";
 title.style.fontWeight = "700";
@@ -74,6 +75,16 @@ placeholder.selected = true;
 routeSelect.appendChild(placeholder);
 
 selectDiv.appendChild(routeSelect);
+
+// Leyenda de Guaguas Municipales
+const leyenda = document.createElement("div");
+leyenda.innerHTML = 'Datos e información propiedad de <a href="https://www.guaguas.com/" target="_blank" style="color: #60a5fa; text-decoration: none;">Guaguas Municipales</a>';
+leyenda.style.fontSize = "12px";
+leyenda.style.color = "#64748b";
+leyenda.style.textAlign = "center";
+leyenda.style.padding = "5px";
+
+selectDiv.appendChild(leyenda);
 
 const buttonsContainer = document.createElement("div");
 buttonsContainer.style.display = "none";
@@ -280,15 +291,15 @@ function init() {
 
   selectDiv.appendChild(fecha2show);
 
-  // Leyenda de Guaguas Municipales
-  const leyenda = document.createElement("div");
-  leyenda.innerHTML = 'Datos e información propiedad de <a href="https://www.guaguas.com/" target="_blank" style="color: #60a5fa; text-decoration: none;">Guaguas Municipales</a>';
-  leyenda.style.fontSize = "12px";
-  leyenda.style.color = "#64748b";
-  leyenda.style.textAlign = "center";
-  leyenda.style.padding = "5px";
+  // Leyenda de Autor
+  const autor = document.createElement("div");
+  autor.innerHTML = 'Página hecha por <a href="https://github.com/Kilamper" target="_blank" style="color: #60a5fa; text-decoration: none;">Kilamper</a>';
+  autor.style.fontSize = "12px";
+  autor.style.color = "#64748b";
+  autor.style.textAlign = "center";
+  autor.style.padding = "5px";
 
-  selectDiv.appendChild(leyenda);
+  selectDiv.appendChild(autor);
   document.body.appendChild(selectDiv);
 
   scene = new THREE.Scene();
