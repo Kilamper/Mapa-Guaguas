@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@netlify/functions": "^4.2.5",
+    "compression": "^1.8.2",
+    "dotenv": "^18.0.5",
     "express": "^4.21.2",
     "serverless-http": "^4.0.0",
     "three": "^0.170.0"

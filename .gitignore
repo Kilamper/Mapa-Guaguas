@@ -86,3 +86,6 @@ shrinkwrap.yaml
 
 # Node-gyp
 .node-gyp
+
+# Transit cache
+.cache_transit/
